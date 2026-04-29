@@ -296,6 +296,9 @@ class SelfReflector:
 
     META_DIR = WORKSPACE / "samantha-hvg" / "meta"
     PREDICTION_FILE = META_DIR / "predictions.jsonl"
+    PREDICTION_ARCHIVE_FILE = META_DIR / "predictions_archive.jsonl"
+    MAX_PREDICTION_RECORDS = 500   # Sliding window: keep last N records
+    MAX_PREDICTION_DAYS = 14       # Also keep only last N days
     REFLECTION_THRESH = 0.5  # 偏差超过此值 → flag
 
     def __init__(self):
@@ -321,6 +324,52 @@ class SelfReflector:
         }
         with open(self.PREDICTION_FILE, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        self._archive_predictions()
+
+    def _archive_predictions(self):
+        """Sliding window: keep only last MAX_PREDICTION_RECORDS and MAX_PREDICTION_DAYS.
+        Older records are moved to the archive file.
+        """
+        import shutil
+        if not self.PREDICTION_FILE.exists():
+            return
+        cutoff = datetime.now() - timedelta(days=self.MAX_PREDICTION_DAYS)
+        all_records = []
+        with open(self.PREDICTION_FILE, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    all_records.append(json.loads(line))
+                except Exception:
+                    continue
+        if len(all_records) <= self.MAX_PREDICTION_RECORDS:
+            return  # No need to archive
+        # Sort by recorded_at descending
+        all_records.sort(key=lambda r: r.get('recorded_at', ''), reverse=True)
+        kept = []
+        archived = []
+        for rec in all_records:
+            try:
+                rec_time = datetime.fromisoformat(rec.get('recorded_at', ''))
+                if rec_time >= cutoff and len(kept) < self.MAX_PREDICTION_RECORDS:
+                    kept.append(rec)
+                else:
+                    archived.append(rec)
+            except Exception:
+                # Can't parse time → archive it
+                archived.append(rec)
+        if not archived:
+            return
+        # Write kept records back
+        with open(self.PREDICTION_FILE, "w", encoding="utf-8") as f:
+            for rec in kept:
+                f.write(json.dumps(rec, ensure_ascii=False) + '\n')
+        # Append archived to archive file
+        with open(self.PREDICTION_ARCHIVE_FILE, "a", encoding="utf-8") as f:
+            for rec in archived:
+                f.write(json.dumps(rec, ensure_ascii=False) + '\n')
 
     # ── Validation Pass ──────────────────────────────────────
 

@@ -18,27 +18,33 @@ from typing import Optional
 # ── Configuration ────────────────────────────────────────────
 WORKSPACE = Path.home() / ".openclaw" / "workspace" / "samantha-hvg"
 EPISODE_DIR = WORKSPACE / "episodes"
+ARCHIVE_DIR = WORKSPACE / "episodes" / "archive"
+VECTORS_FILE = WORKSPACE / "vectors.ndjson"
+MAX_EPISODES = 200   # Sliding window: archive episodes beyond this count
 EPISODE_DIR.mkdir(parents=True, exist_ok=True)
+ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
 
 class VectorIndex:
     """TF-IDF based vector index using pure numpy."""
-    
+
     def __init__(self, episodes: list[dict]):
         self.episodes = episodes
         self.term_to_idx: dict[str, int] = {}
         self.idf: dict[str, float] = {}
         self.episode_vectors: list[dict] = []
-        self._build()
-    
+        self._build_from_episodes()
+        # Load any additional vectors from the vectors file
+        self._load_extra_vectors()
+
     def _tokenize(self, text: str) -> list[str]:
         """
         Chinese-aware tokenization: character unigrams + bigrams + ASCII words.
-        
+
         Strategy:
         - English/ASCII words: split by underscore/camelCase, filter short (<3)
         - Chinese: unigrams + bigrams (captures multi-char term patterns)
         - Mixed: each character treated independently
-        
+
         Bigrams are critical for Chinese: they capture semantic units like
         '心跳' (heartbeat) even without word segmentation.
         """
@@ -68,36 +74,36 @@ class VectorIndex:
                         tokens.append(bigram)
                     prev_char = ch
         return tokens
-    
-    def _build(self):
+
+    def _build_from_episodes(self):
         """Build inverted index + IDF from episodes."""
         import math
-        
+
         doc_count = len(self.episodes)
         if doc_count == 0:
             return
-        
+
         # Count term frequencies across all docs
         df: dict[str, int] = {}
         for ep in self.episodes:
             words = set(self._tokenize(ep.get('content', '')))
             for w in words:
                 df[w] = df.get(w, 0) + 1
-        
+
         # Build term index
         self.term_to_idx = {t: i for i, t in enumerate(sorted(df.keys()))}
-        
+
         # Compute IDF
         for term, doc_freq in df.items():
             self.idf[term] = math.log((doc_count + 1) / (doc_freq + 1)) + 1
-        
+
         # Build episode TF-IDF vectors
         for ep in self.episodes:
             words = self._tokenize(ep.get('content', ''))
             tf = {}
             for w in words:
                 tf[w] = tf.get(w, 0) + 1
-            
+
             vocab_size = len(self.term_to_idx)
             vec = [0.0] * vocab_size
             for term, freq in tf.items():
@@ -105,19 +111,53 @@ class VectorIndex:
                     idx = self.term_to_idx[term]
                     tf_val = freq / max(len(words), 1)
                     vec[idx] = tf_val * self.idf.get(term, 1.0)
-            
+
             norm = math.sqrt(sum(v * v for v in vec))
             self.episode_vectors.append(vec if norm == 0 else [v / norm for v in vec])
-    
+
+    def _load_extra_vectors(self):
+        """Load pre-computed episode vectors from vectors.ndjson (append-only storage)."""
+        if not VECTORS_FILE.exists():
+            return
+        # Load all existing vectors from file
+        existing_ids = {ep['episode_id'] for ep in self.episodes}
+        with open(VECTORS_FILE, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                    eid = entry.get('episode_id', '')
+                    # Skip if we already have this episode's vector (from self.episodes)
+                    if eid in existing_ids:
+                        continue
+                    # Append the pre-computed vector
+                    self.episodes.append(entry)
+                    self.episode_vectors.append(entry.get('vector', []))
+                except Exception:
+                    pass
+
+    @staticmethod
+    def save_vector(episode: dict, vector: list[float]):
+        """Append a computed vector to the vectors.ndjson file."""
+        entry = {
+            'episode_id': episode['episode_id'],
+            'timestamp': episode['timestamp'],
+            'vector': vector,
+        }
+        with open(VECTORS_FILE, 'a', encoding='utf-8') as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + '\n')
+
     def cosine_score(self, query: str) -> list[tuple[str, float]]:
         """Return (episode_id, score) sorted by cosine similarity."""
         import math
-        
+
         words = self._tokenize(query)
         tf = {}
         for w in words:
             tf[w] = tf.get(w, 0) + 1
-        
+
         vocab_size = len(self.term_to_idx)
         qvec = [0.0] * vocab_size
         for term, freq in tf.items():
@@ -125,37 +165,37 @@ class VectorIndex:
                 idx = self.term_to_idx[term]
                 tf_val = freq / max(len(words), 1)
                 qvec[idx] = tf_val * self.idf.get(term, 1.0)
-        
+
         qnorm = math.sqrt(sum(v * v for v in qvec))
         if qnorm == 0:
             return []
         qvec = [v / qnorm for v in qvec]
-        
+
         scores = []
         for i, evec in enumerate(self.episode_vectors):
             dot = sum(q * v for q, v in zip(qvec, evec))
             scores.append((self.episodes[i]['episode_id'], dot))
-        
+
         scores.sort(key=lambda x: x[1], reverse=True)
         return scores
-    
+
     def bm25_score(self, query: str, k1=1.5, b=0.75) -> list[tuple[str, float]]:
         """Return (episode_id, score) sorted by BM25."""
         import math
-        
+
         words = self._tokenize(query)
         doc_count = len(self.episodes)
         avg_dl = sum(len(self._tokenize(ep.get('content', ''))) for ep in self.episodes) / max(doc_count, 1)
-        
+
         scores = []
         for ep in self.episodes:
             doc_words = self._tokenize(ep.get('content', ''))
             dl = len(doc_words)
-            
+
             tf_map = {}
             for w in doc_words:
                 tf_map[w] = tf_map.get(w, 0) + 1
-            
+
             score = 0.0
             for term in words:
                 if term in tf_map:
@@ -164,16 +204,16 @@ class VectorIndex:
                     numerator = tf * (k1 + 1)
                     denominator = tf + k1 * (1 - b + b * dl / max(avg_dl, 1))
                     score += idf * numerator / denominator
-            
+
             scores.append((ep['episode_id'], score))
-        
+
         scores.sort(key=lambda x: x[1], reverse=True)
         return scores
 
 
 class GraphIndex:
     """Pure python entity graph."""
-    
+
     def __init__(self, episodes: list[dict]):
         self.adj: dict[str, set[str]] = {}
         self.entity_episodes: dict[str, list[str]] = {}
@@ -184,11 +224,11 @@ class GraphIndex:
                 for other in ep.get('entities', []):
                     if other != entity:
                         self.adj[entity].add(other)
-                
+
                 if entity not in self.entity_episodes:
                     self.entity_episodes[entity] = []
                 self.entity_episodes[entity].append(ep['episode_id'])
-    
+
     def get_connected_entities(self, entity: str, depth: int = 1) -> set[str]:
         """BFS to find entities connected within depth hops."""
         if entity not in self.adj:
@@ -204,27 +244,27 @@ class GraphIndex:
                         next_frontier.add(neighbor)
             frontier = next_frontier
         return visited - {entity}
-    
+
     def get_episodes_with_entity(self, entity: str) -> list[str]:
         return self.entity_episodes.get(entity, [])
-    
+
     def get_entity_neighbors(self, entity: str) -> list[str]:
         return list(self.adj.get(entity, set()))
 
 
 class EpisodeStore:
     """JSON-based episode storage."""
-    
+
     def __init__(self, directory: Path = EPISODE_DIR):
         self.directory = directory
-    
+
     def save(self, episode: dict) -> str:
         ep_id = episode['episode_id']
         filepath = self.directory / f"{ep_id}.json"
         with open(filepath, 'w', encoding='utf-8') as f:
             json.dump(episode, f, ensure_ascii=False, indent=2)
         return ep_id
-    
+
     def load_all(self) -> list[dict]:
         episodes = []
         for filepath in sorted(self.directory.glob("*.json")):
@@ -234,7 +274,7 @@ class EpisodeStore:
             except Exception:
                 continue
         return episodes
-    
+
     def load(self, episode_id: str) -> Optional[dict]:
         filepath = self.directory / f"{episode_id}.json"
         if not filepath.exists():
@@ -245,7 +285,7 @@ class EpisodeStore:
 
 class HVGMemory:
     """Main Hybrid-Vector-Graph Memory system."""
-    
+
     def __init__(self, alpha=0.4, beta=0.4, gamma=0.2):
         self.store = EpisodeStore()
         self.alpha = alpha  # vector weight
@@ -255,13 +295,13 @@ class HVGMemory:
         self.vector_index: Optional[VectorIndex] = None
         self.graph_index: Optional[GraphIndex] = None
         self._reindex()
-    
+
     def _reindex(self):
-        """Rebuild all indices from stored episodes."""
+        """Full rebuild: load all episodes and rebuild all indices."""
         self.episodes = self.store.load_all()
         self.vector_index = VectorIndex(self.episodes)
         self.graph_index = GraphIndex(self.episodes)
-    
+
     @staticmethod
     def extract_entities(content: str) -> list[str]:
         """
@@ -333,9 +373,36 @@ class HVGMemory:
             'metadata': metadata or {},
         }
         self.store.save(episode)
-        self._reindex()
+        self._reindex()  # full rebuild (still needed for graph index)
+        # Archive old episodes if over limit
+        self._archive_check()
         return ep_id
-    
+
+    def _archive_check(self):
+        """Sliding window: archive episodes beyond MAX_EPISODES."""
+        episodes = sorted(
+            self.store.load_all(),
+            key=lambda e: e.get("timestamp", "")
+        )
+        if len(episodes) <= MAX_EPISODES:
+            return
+        to_archive = episodes[:-MAX_EPISODES]
+        for ep in to_archive:
+            ep_id = ep.get("episode_id", "")
+            src = EPISODE_DIR / f"{ep_id}.json"
+            if not src.exists():
+                continue
+            ts_str = ep.get("timestamp", "")[:7]  # YYYY-MM
+            year_month = ts_str.replace("-", "/")
+            dst_dir = ARCHIVE_DIR / year_month
+            dst_dir.mkdir(parents=True, exist_ok=True)
+            dst = dst_dir / f"{ep_id}.json"
+            try:
+                import shutil
+                shutil.move(str(src), str(dst))
+            except Exception:
+                pass
+
     def search(
         self,
         query: str,
@@ -395,12 +462,12 @@ class HVGMemory:
         g_norm = minmax_norm(graph_scores) if graph_scores else {}
 
         # Character-level Jaccard fallback for episodes with zero vector/BM25 scores
-        q_chars = set(query) - {' ', '　'}
+        q_chars = set(query) - {' ', ' '}
 
         def char_jaccard(ep_content: str) -> float:
             if not q_chars:
                 return 0.0
-            ep_chars = set(ep_content) - {' ', '　', '\n', '\t'}
+            ep_chars = set(ep_content) - {' ', ' ', '\n', '\t'}
             overlap = len(q_chars & ep_chars)
             union = len(q_chars | ep_chars)
             return overlap / union if union > 0 else 0.0
@@ -426,24 +493,24 @@ class HVGMemory:
 
         results.sort(key=lambda x: x[1], reverse=True)
         return [{**ep, 'hvg_score': round(score, 4)} for ep, score in results[:top_k]]
-    
+
     def query_by_entity(self, entity: str, depth: int = 1, top_k: int = 5) -> list[dict]:
         """Graph-walk query: find entities connected to given entity."""
         neighbors = self.graph_index.get_connected_entities(entity, depth)
         all_eps = set()
         for e in [entity] + list(neighbors):
             all_eps.update(self.graph_index.get_episodes_with_entity(e))
-        
+
         episodes = []
         for ep_id in all_eps:
             ep = self.store.load(ep_id)
             if ep:
                 ep['hvg_score'] = 1.0 if entity in ep.get('entities', []) else 0.5
                 episodes.append(ep)
-        
+
         episodes.sort(key=lambda x: x['hvg_score'], reverse=True)
         return episodes[:top_k]
-    
+
     def stats(self) -> dict:
         """Return system statistics."""
         entity_set = set()
