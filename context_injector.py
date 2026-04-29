@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 """
 AutonomousLoop Context Injector
 ===============================
@@ -239,12 +240,16 @@ def generate_context_inject(
     state = load_state()
     recent = load_recent_episodes(hours)
 
+    # 目标状态 - 始终加载（不受去重影响）
+    goals = load_active_goal_summary()
+    goal_summary = format_goal_summary(goals) if goals else ""
+
     if not recent:
         return {
             "context_lines": [],
-            "goal_summary": "",
-            "stats": {"episodes_found": 0},
-            "ready": False,
+            "goal_summary": goal_summary,
+            "stats": {"episodes_found": 0, "goal_count": len(goals)},
+            "ready": bool(goals),
         }
 
     # 去重（基于 timestamp+content hash）
@@ -259,13 +264,13 @@ def generate_context_inject(
         unique_eps.append(ep)
         new_hashes.append(h)
 
-    # 如果没有新的，跳过
+    # 如果没有新的，但有目标，仍返回（目标摘要需要展示）
     if not unique_eps and not force:
         return {
             "context_lines": [],
-            "goal_summary": "",
-            "stats": {"episodes_found": len(recent), "new": 0},
-            "ready": False,
+            "goal_summary": goal_summary,
+            "stats": {"episodes_found": len(recent), "new": 0, "goal_count": len(goals)},
+            "ready": bool(goals),
         }
 
     # 按类型优先级排序
@@ -285,10 +290,6 @@ def generate_context_inject(
     context_lines = []
     for i, ep in enumerate(top_eps, 1):
         context_lines.append(format_episode(ep, i))
-
-    # 目标状态
-    goals = load_active_goal_summary()
-    goal_summary = format_goal_summary(goals) if goals else ""
 
     # 更新 state
     new_seen = (new_hashes + seen_hashes)[-50:]  # 保留最近 50 个 hash
