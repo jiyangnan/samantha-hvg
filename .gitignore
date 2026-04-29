@@ -11,3 +11,6 @@ goals/
 meta/
 *.jsonl
 
+
+context_inject.txt
+context_injector_state.json
