@@ -125,9 +125,39 @@ def tick() -> dict:
     return summary
 
 
+def scan() -> dict:
+    """
+    Run the SignalGenerator to actively probe the environment.
+    Generates new signals based on memory levels, goal tracking, time triggers.
+    Then runs tick() to process any signals that were written.
+    """
+    try:
+        from signal_generator import SignalGenerator
+        gen = SignalGenerator()
+        scan_result = gen.run()
+
+        result = {
+            "time": datetime.now().isoformat(),
+            "scan": scan_result,
+            "tick": None,
+        }
+
+        # If signals were written, run tick to process them
+        if scan_result.get("signals_written", 0) > 0:
+            result["tick"] = tick()
+        else:
+            log(f"Scan #{gen.state.get('last_scan', 'N/A')}: {scan_result['signals_found']} 信号, 0 写入（静默）", "DEBUG")
+
+        return result
+    except Exception as e:
+        log(f"Scan failed: {e}", "ERROR")
+        return {"time": datetime.now().isoformat(), "error": str(e)}
+
+
 def main():
     parser = argparse.ArgumentParser(description="AutonomousLoop Heartbeat Integrator")
     parser.add_argument("--tick", action="store_true", help="Run single heartbeat tick")
+    parser.add_argument("--scan", action="store_true", help="Run SignalGenerator scan + AutonomousLoop tick")
     parser.add_argument("--stats", action="store_true", help="Print loop stats and exit")
     parser.add_argument("--inject", nargs=2, metavar=("TYPE", "RAW"),
                         help="Inject a signal manually: TYPE RAW")
@@ -153,12 +183,17 @@ def main():
             print(f"静默（未达阈值 {loop.threshold}）")
         return
 
+    if args.scan:
+        result = scan()
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return
+
     if args.tick:
         tick()
         return
 
-    # Default: run tick
-    result = tick()
+    # Default: run scan + tick
+    result = scan()
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 

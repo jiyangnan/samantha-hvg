@@ -51,22 +51,24 @@ class StimulusType(Enum):
 @dataclass
 class Percept:
     """Structured fact extracted from raw stimulus."""
-    type:       StimulusType
-    raw:        str
-    query:      str           # searchable representation
-    entities:   list[str]     = field(default_factory=list)
-    trigger:    bool = False  # whether it hit trigger words
-    confidence: float = 0.5   # how certain we are
+    type:           StimulusType
+    raw:            str
+    query:          str           # searchable representation
+    entities:       list[str]    = field(default_factory=list)
+    trigger:        bool = False  # whether it hit trigger words
+    confidence:     float = 0.5  # how certain we are
+    situation_type: str = ""     # from SignalGenerator (optional hint)
 
 
 @dataclass
 class Judgment:
     """First-Principles reasoning output."""
-    essence:     str   # "这件事的本质是什么"
-    principle:   str   # "我应该怎么想"
-    value:       float # 0.0-1.0, whether it's worth acting on
-    confidence:  float # how certain the reasoning is
-    reasoning:   str   # brief trace of the deduction
+    essence:       str   # "这件事的本质是什么"
+    principle:     str   # "我应该怎么想"
+    value:         float # 0.0-1.0, whether it's worth acting on
+    confidence:    float # how certain the reasoning is
+    reasoning:     str   # explicit trace: Step 1 → Step 2 → ...
+    situation_type: str = ""  # classified situation type
 
 
 @dataclass
@@ -148,6 +150,7 @@ class AutonomousLoop:
         """
         Convert raw stimulus into structured Percept.
         Detects trigger words and extracts searchable query + entities.
+        Preserves situation_type if already classified by SignalGenerator.
         """
         stype = StimulusType(stimulus.get("type", "user_message"))
         raw   = stimulus.get("raw", "")
@@ -175,6 +178,7 @@ class AutonomousLoop:
             entities=entities,
             trigger=trigger,
             confidence=min(confidence, 1.0),
+            situation_type=stimulus.get("situation", ""),
         )
 
     def _extract_entities(self, text: str) -> list[str]:
@@ -204,43 +208,74 @@ class AutonomousLoop:
         except Exception:
             return []
 
-    # ── Layer 3: First-Principles Judgment ────────────────────
+    # ── Layer 3: First-Principles Judgment (Soul) ────────────────────
 
     def _judge(self, percept: Percept, context: list[dict]) -> Judgment:
         """
-        Apply First-Principles reasoning to determine:
-        - What is the essence of this?
-        - What should I think about it?
-        - Is it worth acting on?
+        Apply First-Principles reasoning via SoulReasoner.
+        Delegates to signal_generator.SoulReasoner for structural reasoning,
+        then enriches with HVG context scores.
+
+        The reasoning trace is explicit: Step 1 → Step 2 → ...
+        No "通常" / "一般" / "大家都是" — must cite physical/logical necessity.
         """
-        # Default: based on trigger + context quality
-        essence = "用户表达了明确的记忆或行动需求"
-        principle = "这类信息应该被持久化，并在相关时机被检索和使用"
+        try:
+            from signal_generator import SoulReasoner
+            soul = SoulReasoner()
 
-        value = 0.5
-        if percept.trigger:
-            value = 0.85
-        if len(context) > 0:
-            # Boost value if we have relevant history
-            avg_score = sum(c["hvg_score"] for c in context) / len(context)
-            value = max(value, avg_score + 0.1)
+            # Build stimulus dict for SoulReasoner
+            stimulus = {
+                "type":       percept.type.value,
+                "raw":        percept.raw,
+                "confidence": percept.confidence,
+                "entities":   percept.entities,
+                "trigger":    percept.trigger,
+            }
 
-        # First-principles override: check for goal-related signals
-        goal_words = {"目标", "计划", "下次", "持续", "自主", "未来", "以后"}
-        if any(w in percept.query for w in goal_words):
-            essence = "用户定义了一个需要持续追踪的目标"
-            principle = "目标需要被写入记忆并在达到条件时被主动提起"
-            value = max(value, 0.9)
+            # Soul reasoning (first-principles)
+            soul_result = soul.reason(stimulus)
 
-        confidence = percept.confidence * 0.7 + (len(context) / 10)
+            # Enrich with HVG context quality
+            avg_hvg_score = 0.0
+            if context:
+                scores = [c["hvg_score"] for c in context if isinstance(c.get("hvg_score"), (int, float))]
+                if scores:
+                    avg_hvg_score = sum(scores) / len(scores)
 
-        return Judgment(
-            essence=essence,
-            principle=principle,
-            value=min(value, 1.0),
-            confidence=min(confidence, 1.0),
-            reasoning=f"trigger={percept.trigger}, context_episodes={len(context)}, entities={percept.entities}",
-        )
+            # HVG context boosts confidence if we found relevant history
+            final_value = soul_result["value"]
+            if avg_hvg_score > 0.5:
+                # We have strong relevant context → boost value slightly
+                final_value = min(1.0, final_value + avg_hvg_score * 0.1)
+
+            # Build reasoning trace (explicit chain)
+            reasoning_parts = [soul_result["reasoning"]]
+            if context:
+                reasoning_parts.append(
+                    f"[Step 5] HVG context enrichment: "
+                    f"context_episodes={len(context)}, avg_hvg_score={avg_hvg_score:.3f}"
+                )
+            reasoning_parts.append(f"[Final] Value after enrichment: {final_value:.3f}")
+
+            return Judgment(
+                essence=soul_result["essence"],
+                principle=soul_result["principle"],
+                value=round(final_value, 3),
+                confidence=soul_result["confidence"],
+                reasoning="\n".join(reasoning_parts),
+                situation_type=soul_result["situation_type"],
+            )
+
+        except Exception as e:
+            # Fallback: if Soul import fails, use minimal reasoning
+            return Judgment(
+                essence="无法调用 SoulReasoner，使用降级推理",
+                principle="降级模式：任何用户主动表达的信息都值得写入记忆",
+                value=0.85 if percept.trigger else 0.5,
+                confidence=percept.confidence * 0.5,
+                reasoning=f"SoulReasoner failed: {e}. Fallback to trigger-based.",
+                situation_type="fallback",
+            )
 
     # ── Layer 4: Decision Gate ────────────────────────────────
 

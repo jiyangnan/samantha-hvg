@@ -2,3 +2,6 @@ episodes/*.json
 __pycache__/
 *.pyc
 loop_state.json
+loop_state.json
+signal_gen_state.json
+loop_log.jsonl
