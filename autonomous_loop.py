@@ -329,7 +329,7 @@ class AutonomousLoop:
 
     # ── Layer 6: Execute ─────────────────────────────────────
 
-    def _execute(self, plan: ActionPlan, percept: Percept) -> tuple[bool, str]:
+    def _execute(self, plan: ActionPlan, percept: Percept, goal_id: str = "") -> tuple[bool, str]:
         """
         Execute the action plan.
         Returns (success, outcome_summary).
@@ -338,11 +338,9 @@ class AutonomousLoop:
             return True, "静默：未达到行动阈值"
 
         if plan.mode == "flag_human":
-            # Signal that human input is needed
             return False, f"[FLAG] 需要确认: {', '.join(plan.steps[:1])}"
 
         if plan.mode == "execute":
-            # Actually write to HVG
             if self.hvg:
                 try:
                     ep_id = self.hvg.add_episode(
@@ -350,6 +348,8 @@ class AutonomousLoop:
                         trigger=f"autonomous_loop: {percept.type.value}",
                         entities=percept.entities or None,
                     )
+                    # Record prediction for future self-reflection validation
+                    self._record_prediction(plan, percept, goal_id)
                     return True, f"已写入HVG: {ep_id}"
                 except Exception as e:
                     return False, f"写入失败: {e}"
@@ -357,13 +357,29 @@ class AutonomousLoop:
 
         return False, "未知模式"
 
+    def _record_prediction(self, plan: ActionPlan, percept: Percept, goal_id: str):
+        """Record expected outcome for future self-reflection validation."""
+        try:
+            from self_reflector import SelfReflector
+            import uuid
+            tick_id = f"tick-{self.state['tick_count']}-{uuid.uuid4().hex[:6]}"
+            context = {
+                "situation":    percept.type.value,
+                "goal_id":      goal_id,
+                "action_type":  plan.mode,
+                "value":        percept.confidence,
+            }
+            expected = plan.expected
+            SelfReflector().record_prediction(tick_id, expected, context)
+        except Exception:
+            pass  # Self-reflector is optional, never blocks execution
+
     # ── Layer 7: Learn ───────────────────────────────────────
 
-    def _learn(self, result: LoopResult):
+    def _learn(self, result: LoopResult, goal_id: str = ""):
         """Write the loop outcome back to HVG as a meta-episode."""
         if not self.hvg:
             return
-
         try:
             content = (
                 f"AutonomousLoop tick #{self.state['tick_count']}: "
@@ -393,6 +409,9 @@ class AutonomousLoop:
         """
         self.state["tick_count"] += 1
 
+        # Extract goal_id if this stimulus is related to a tracked goal
+        goal_id = stimulus.get("goal_id", "")
+
         # 1. Perceive
         percept = self._perceive(stimulus)
 
@@ -411,10 +430,10 @@ class AutonomousLoop:
         # 5. Plan
         plan = self._plan(judgment, percept)
 
-        # 6. Execute
-        executed, outcome = self._execute(plan, percept)
+        # 6. Execute (with goal tracking)
+        executed, outcome = self._execute(plan, percept, goal_id=goal_id)
 
-        # 7. Learn (write meta back to HVG)
+        # 7. Learn (write meta back to HVG, update goal activity)
         result = LoopResult(
             percept=percept,
             judgment=judgment,
@@ -423,7 +442,15 @@ class AutonomousLoop:
             outcome=outcome,
             hvg_episode=None,
         )
-        self._learn(result)
+        self._learn(result, goal_id=goal_id)
+
+        # If goal_id exists, record this activity
+        if goal_id and result.executed:
+            try:
+                from self_reflector import GoalRegistry
+                GoalRegistry().record_activity(goal_id)
+            except Exception:
+                pass
 
         # Update state
         self.state["last_act"] = datetime.now().isoformat()

@@ -32,6 +32,29 @@ sys.path.insert(0, str(Path(__file__).parent))
 from autonomous_loop import AutonomousLoop
 
 
+def _write_reflection_signal(sig: dict):
+    """Write a reflection-generated signal to the signals directory."""
+    SIGNAL_DIR.mkdir(parents=True, exist_ok=True)
+    import uuid
+    filename = f"reflect_{sig['type']}_{uuid.uuid4().hex[:6]}.json"
+    fpath    = SIGNAL_DIR / filename
+    payload  = {
+        "type":      sig["type"],
+        "raw":       sig["raw"],
+        "reason":    sig.get("reason", ""),
+        "priority":  sig.get("priority", 3),
+        "trigger":   False,
+        "goal_id":   sig.get("goal_id", ""),
+        "_from":     "self_reflector",
+        "created":   datetime.now().isoformat(),
+    }
+    try:
+        with open(fpath, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
 def log(msg: str, level: str = "INFO"):
     """Append to loop log."""
     entry = {
@@ -129,22 +152,56 @@ def scan() -> dict:
     """
     Run the SignalGenerator to actively probe the environment.
     Generates new signals based on memory levels, goal tracking, time triggers.
+    Also runs SelfReflector to validate predictions and check goal status transitions.
     Then runs tick() to process any signals that were written.
     """
     try:
         from signal_generator import SignalGenerator
+        from self_reflector import SelfReflector
+
         gen = SignalGenerator()
         scan_result = gen.run()
+
+        # Run self-reflection pass (prediction validation + goal state checks)
+        reflector = SelfReflector()
+        reflection_result = reflector.run_reflection_pass()
 
         result = {
             "time": datetime.now().isoformat(),
             "scan": scan_result,
+            "reflection": reflection_result,
             "tick": None,
         }
 
-        # If signals were written, run tick to process them
-        if scan_result.get("signals_written", 0) > 0:
-            result["tick"] = tick()
+        # Merge reflection signals into signals list for tick processing
+        all_signals = []
+        for sig in scan_result.get("details", []):
+            sig["_from"] = "signal_generator"
+            all_signals.append(sig)
+        for sig in reflection_result.get("signals", []):
+            sig["_from"] = "self_reflector"
+            all_signals.append(sig)
+
+        # Write reflection signals that are above threshold
+        for sig in reflection_result.get("signals", []):
+            if sig.get("priority", 3) <= 2:
+                _write_reflection_signal(sig)
+
+        # If any signals were written, run tick to process them
+        total_signals = scan_result.get("signals_written", 0) + len(reflection_result.get("signals", []))
+        if total_signals > 0:
+            # Run tick for each signal
+            tick_results = []
+            for sig in all_signals:
+                if sig.get("priority", 3) <= 2:
+                    sig_type = sig.get("type", "unknown")
+                    sig_raw  = sig.get("raw", "")
+                    loop = AutonomousLoop()
+                    tick_result = loop.tick({"type": sig_type, "raw": sig_raw})
+                    if tick_result:
+                        tick_results.append(tick_result)
+            result["tick"] = {"processed": len(tick_results)} if tick_results else None
+            log(f"Scan: {scan_result['signals_found']} scan signals, {len(reflection_result.get('signals',[]))} reflection signals, {len(tick_results)} ticks", "INFO")
         else:
             log(f"Scan #{gen.state.get('last_scan', 'N/A')}: {scan_result['signals_found']} 信号, 0 写入（静默）", "DEBUG")
 
@@ -158,6 +215,7 @@ def main():
     parser = argparse.ArgumentParser(description="AutonomousLoop Heartbeat Integrator")
     parser.add_argument("--tick", action="store_true", help="Run single heartbeat tick")
     parser.add_argument("--scan", action="store_true", help="Run SignalGenerator scan + AutonomousLoop tick")
+    parser.add_argument("--reflect", action="store_true", help="Run SelfReflector reflection pass")
     parser.add_argument("--stats", action="store_true", help="Print loop stats and exit")
     parser.add_argument("--inject", nargs=2, metavar=("TYPE", "RAW"),
                         help="Inject a signal manually: TYPE RAW")
@@ -185,6 +243,12 @@ def main():
 
     if args.scan:
         result = scan()
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return
+
+    if args.reflect:
+        from self_reflector import SelfReflector
+        result = SelfReflector().run_reflection_pass()
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return
 
