@@ -1,0 +1,18 @@
+{
+  "episode_id": "ep-20260427-234323-ce16a2",
+  "timestamp": "2026-04-27T23:43:23.061387",
+  "trigger": "user: --enable-episodic-index",
+  "content": "用户尝试给 Samantha --enable-episodic-index 'Hybrid-Vector-Graph' 命令，发现是 Hermes 系统（@eastweb3eth）的三个设计之一。最终决定用 numpy-only 方案构建 Samantha 版本",
+  "entities": [
+    "Samantha",
+    "Hermes",
+    "Hybrid-Vector-Graph",
+    "尼卡"
+  ],
+  "tags": [
+    "hvg",
+    "hermes",
+    "system"
+  ],
+  "metadata": {}
+}

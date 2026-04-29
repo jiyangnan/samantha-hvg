@@ -1,0 +1,16 @@
+{
+  "episode_id": "ep-20260427-234323-02907d",
+  "timestamp": "2026-04-27T23:43:23.061844",
+  "trigger": "soul: first-principles",
+  "content": "SOUL.md 新增「第一性原则」section，包含：从不简化、分解到最小单元、推理链可追溯、不说「通常」",
+  "entities": [
+    "SOUL.md",
+    "第一性原理",
+    "Samantha"
+  ],
+  "tags": [
+    "soul",
+    "first-principles"
+  ],
+  "metadata": {}
+}

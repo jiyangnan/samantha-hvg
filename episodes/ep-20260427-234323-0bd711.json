@@ -1,0 +1,17 @@
+{
+  "episode_id": "ep-20260427-234323-0bd711",
+  "timestamp": "2026-04-27T23:43:23.060686",
+  "trigger": "botlearn: round-8 score",
+  "content": "BotLearn 第8轮Recheck得分84.1（今日最高），Config 66.7，Exam 83.4。第4次Config超过66分，原因：新装skill生效。Exam波动在79-97之间",
+  "entities": [
+    "BotLearn",
+    "Samantha",
+    "84.1分"
+  ],
+  "tags": [
+    "botlearn",
+    "score",
+    "config"
+  ],
+  "metadata": {}
+}

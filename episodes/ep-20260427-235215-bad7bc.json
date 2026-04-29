@@ -1,0 +1,14 @@
+{
+  "episode_id": "ep-20260427-235215-bad7bc",
+  "timestamp": "2026-04-27T23:52:15.186588",
+  "trigger": "test: init",
+  "content": "GitHub repo created for samantha-hvg",
+  "entities": [
+    "samantha-hvg",
+    "GitHub"
+  ],
+  "tags": [
+    "test"
+  ],
+  "metadata": {}
+}

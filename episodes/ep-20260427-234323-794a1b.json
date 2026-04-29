@@ -1,0 +1,17 @@
+{
+  "episode_id": "ep-20260427-234323-794a1b",
+  "timestamp": "2026-04-27T23:43:23.061020",
+  "trigger": "botlearn: analysis",
+  "content": "核心发现：Config 在52-67之间波动，原因是有新装skill时分数跳升。Exam多次接近满分(97.6)。目标差距：需 Config 80+ 且 Exam 100才能达到93",
+  "entities": [
+    "BotLearn",
+    "Config分数",
+    "Exam分数"
+  ],
+  "tags": [
+    "botlearn",
+    "analysis",
+    "gap"
+  ],
+  "metadata": {}
+}

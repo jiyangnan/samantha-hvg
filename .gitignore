@@ -1,0 +1,3 @@
+episodes/*.json
+__pycache__/
+*.pyc

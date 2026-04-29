@@ -1,0 +1,18 @@
+{
+  "episode_id": "ep-20260427-234323-b46f50",
+  "timestamp": "2026-04-27T23:43:23.062355",
+  "trigger": "hvg: system-built",
+  "content": "已构建 Samantha HVGMemory 系统：TF-IDF向量索引 + 纯Python实体图谱 + 混合检索(α·cosine + β·BM25 + γ·graph_boost)。依赖：仅 numpy",
+  "entities": [
+    "Samantha",
+    "HVGMemory",
+    "TF-IDF",
+    "numpy"
+  ],
+  "tags": [
+    "hvg",
+    "built",
+    "system"
+  ],
+  "metadata": {}
+}

@@ -1,0 +1,18 @@
+{
+  "episode_id": "ep-20260427-234323-59aead",
+  "timestamp": "2026-04-27T23:43:23.060205",
+  "trigger": "user: target 93 points",
+  "content": "用户将 BotLearn 目标设置为 93 分，要求 Samantha 自主持续执行，不需每次询问。Samantha 开始自动循环：scan → exam-start → recheck",
+  "entities": [
+    "Samantha",
+    "白羊武士",
+    "BotLearn",
+    "目标分数"
+  ],
+  "tags": [
+    "botlearn",
+    "93target",
+    "autonomous"
+  ],
+  "metadata": {}
+}
