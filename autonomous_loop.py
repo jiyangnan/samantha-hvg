@@ -41,11 +41,14 @@ TRIGGER_WEIGHT = 0.7  # minimum judgment value to act
 
 
 class StimulusType(Enum):
-    USER_MESSAGE  = "user_message"
-    TIMER_TICK    = "timer_tick"
-    SYSTEM_EVENT  = "system_event"
-    HVG_SIGNAL    = "hvg_signal"
-    GOAL_OFFSET   = "goal_offset"
+    USER_MESSAGE    = "user_message"
+    TIMER_TICK      = "timer_tick"
+    SYSTEM_EVENT    = "system_event"
+    HVG_SIGNAL      = "hvg_signal"
+    GOAL_OFFSET     = "goal_offset"
+    REFLECTION      = "reflection_signal"
+    ANOMALY         = "anomaly_detected"
+    MEMORY_FLOW     = "memory_flow"
 
 
 @dataclass
